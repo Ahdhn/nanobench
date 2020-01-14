@@ -24,7 +24,7 @@ set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -lineinfo; -std=c++11; -expt-extended-la
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -Xptxas -v;)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -Wall -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -Wall")
 
 if(MSVC)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_SCL_SECURE_NO_WARNINGS")
@@ -39,11 +39,8 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 file(GLOB_RECURSE MY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.*)
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MY_SRC})
 
-if (MSVC)
-	add_executable(${PROJECT_NAME} "${MY_SRC}")
-else()
-	CUDA_ADD_EXECUTABLE(${PROJECT_NAME} "${MY_SRC}")
-endif()
+
+add_executable(${PROJECT_NAME} "${MY_SRC}")
 
 ##add features to the library -> require it to compile with cuda c++11
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
