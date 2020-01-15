@@ -34,8 +34,13 @@ __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, doub
 * handmadeDaxpyGraph()
 */
 inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int num_ops,
-    double* h_p_gold) {
+                                const int num_nodes, double* h_p_gold) {
     //return the time in float 
+    if (num_ops % num_nodes != 0) {
+        fprintf(stderr, "cublasDaxpyGraph():: num_ops should be divisible by num_nodes");
+        exit(EXIT_FAILURE);
+    }
+    int num_runs = num_ops / num_nodes;
     const double alpha = 1.0;
     const int threads = 128;
     const int blocks = (N + threads - 1) / threads;
@@ -45,9 +50,8 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     
     cudaGraph_t graph;
     CUDA_ERROR(cudaGraphCreate(&graph, 0));
-    cudaKernelNodeParams kernel_node_params = { 0 };
-    cudaGraphNode_t kernel_node;
-    std::vector<cudaGraphNode_t> depend;
+    cudaKernelNodeParams kernel_node_params = { 0 };    
+    
 
     void* kernel_args[4] = { (void*)&N, (void*)&d_r, (void*)&d_p, (void*)&alpha };
     kernel_node_params.func = (void*)handmadeDaxpy;
@@ -57,15 +61,20 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     kernel_node_params.kernelParams = (void**)kernel_args;
     kernel_node_params.extra = NULL;    
 
-    CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node, graph, depend.data(), 
-        depend.size(), &kernel_node_params));
+    std::vector<cudaGraphNode_t> kernel_node(num_nodes);
+    CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node[0], graph, NULL,
+        0, &kernel_node_params));
+    for (int n = 1; n < num_nodes; ++n) {
+        CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node[n], graph, &kernel_node[n-1],
+            1, &kernel_node_params));
+    }
 
     cudaGraphNode_t* nodes = NULL;
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(graph, nodes, &generated_num_nodes));
-    if (generated_num_nodes != 1) {
+    if (generated_num_nodes != num_nodes) {
         fprintf(stderr, "handmadeDaxpyGraph():: CUDA Graph has generated %d but the expected is %d",
-            static_cast<int>(generated_num_nodes), 1);
+            static_cast<int>(generated_num_nodes), num_nodes);
         exit(EXIT_FAILURE);
     }
 
@@ -77,7 +86,7 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     CUDA_ERROR(cudaEventCreate(&stop));
     CUDA_ERROR(cudaEventRecord(start, stream));
 
-    for (int iter = 0; iter < num_ops; ++iter) {
+    for (int iter = 0; iter < num_runs; ++iter) {
         CUDA_ERROR(cudaGraphLaunch(exec_graph, stream));        
         CUDA_ERROR(cudaStreamSynchronize(stream));
     }
@@ -93,7 +102,7 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
 
 
     if (!moveAndCompare(N, d_p, h_p_gold)) {
-        std::cout << " handmadeDaxpyStream() failed with N = " << N << std::endl;
+        std::cout << " handmadeDaxpyGraph() failed with N = " << N << std::endl;
         exit(EXIT_FAILURE);
     }
     return time / num_ops;
@@ -214,7 +223,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(cuda_graph, nodes, &generated_num_nodes));
     if (generated_num_nodes != num_nodes) {
-        fprintf(stderr, "cublasDaxpyGraph():: CUDA Graph has generated %d but the input is %d", 
+        fprintf(stderr, "cublasDaxpyGraph():: CUDA Graph has generated %d but the expected is %d",        
         static_cast<int>(generated_num_nodes), num_nodes);                
         exit(EXIT_FAILURE);
     }   
@@ -299,7 +308,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
         
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data());
+        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
@@ -309,7 +318,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
         //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
