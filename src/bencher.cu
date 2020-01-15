@@ -16,7 +16,62 @@ inline bool moveAndCompare(const int N, double* d_p, double* h_p_gold) {
     return compare_arr(h_p_gold, h_p_res.data(), N);
 }
 
-inline float DaxpyStream(const int N, double* d_r, double* d_p, const int num_ops,
+
+__global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, double alpha) {
+
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;    
+    if (tid < N) {
+        double p = d_p[tid];
+        double r = d_r[tid];
+        p *= alpha;
+        p += r;
+        d_p[tid] = p;
+    }
+}
+
+/** 
+* handmadeDaxpyStream()
+*/
+inline float handmadeDaxpyStream(const int N, double* d_r, double* d_p, const int num_ops,
+    double* h_p_gold) {
+    //return the time in float 
+    const double alpha = 1.0;
+    const int threads = 128;
+    const int blocks = (N + threads - 1) / threads;
+
+    cudaStream_t stream;
+    CUDA_ERROR(cudaStreamCreate(&stream));
+    
+    cudaEvent_t start, stop;
+    CUDA_ERROR(cudaEventCreate(&start));
+    CUDA_ERROR(cudaEventCreate(&stop));
+    CUDA_ERROR(cudaEventRecord(start, stream));
+    for (int iter = 0; iter < num_ops; ++iter) {
+        handmadeDaxpy <<<blocks, threads,0, stream >>>(N, d_r, d_p, alpha);
+        CUDA_ERROR(cudaStreamSynchronize(stream));
+    }
+
+    CUDA_ERROR(cudaEventRecord(stop, stream));
+    CUDA_ERROR(cudaEventSynchronize(stop));
+    CUDA_ERROR(cudaDeviceSynchronize());
+    CUDA_ERROR(cudaGetLastError());
+    CUDA_ERROR(cudaStreamDestroy(stream));
+    
+    float time = 0.0f;//ms
+    CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
+
+
+    if (!moveAndCompare(N, d_p, h_p_gold)) {
+        std::cout << " handmadeDaxpyStream() failed with N = " << N << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    return time / num_ops;
+}
+
+/**
+* cublasDaxpyStream()
+*/
+inline float cublasDaxpyStream(const int N, double* d_r, double* d_p, const int num_ops,
      double* h_p_gold) {
      //return the time in float 
     double alpha = 1.0;        
@@ -49,7 +104,7 @@ inline float DaxpyStream(const int N, double* d_r, double* d_p, const int num_op
        
 
     if (!moveAndCompare(N, d_p, h_p_gold)) {
-        std::cout << " DaxpyStream() failed with N = " << N << std::endl;
+        std::cout << " cublasDaxpyStream() failed with N = " << N << std::endl;
         exit(EXIT_FAILURE);
     }
 
@@ -59,11 +114,14 @@ inline float DaxpyStream(const int N, double* d_r, double* d_p, const int num_op
 
 }
 
-inline float DaxpyGraph(const int N, double*d_r, double *d_p, const int num_ops,
+/**
+* cublasDaxpyGraph()
+*/
+inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int num_ops,
                         const int num_nodes, double* h_p_gold) {
     //return the time in float 
     if(num_ops % num_nodes != 0){
-        fprintf(stderr, "DaxpyGraph():: num_ops shoudld be divisible by num_nodes");        
+        fprintf(stderr, "cublasDaxpyGraph():: num_ops should be divisible by num_nodes");        
         exit(EXIT_FAILURE);
     }
     
@@ -86,7 +144,7 @@ inline float DaxpyGraph(const int N, double*d_r, double *d_p, const int num_ops,
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(cuda_graph, nodes, &generated_num_nodes));
     if (generated_num_nodes != num_nodes) {
-        fprintf(stderr, "DaxpyGraph():: CUDA Graph has generated %d but the input is %d", 
+        fprintf(stderr, "cublasDaxpyGraph():: CUDA Graph has generated %d but the input is %d", 
         static_cast<int>(generated_num_nodes), num_nodes);                
         exit(EXIT_FAILURE);
     }   
@@ -116,26 +174,33 @@ inline float DaxpyGraph(const int N, double*d_r, double *d_p, const int num_ops,
     CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
 
     if (!moveAndCompare(N, d_p, h_p_gold)) {
-        fprintf(stderr, "DaxpyGraph():: failed with N= %d", N);                
+        fprintf(stderr, "cublasDaxpyGraph():: failed with N= %d", N);                
         exit(EXIT_FAILURE);
     }
 
     return time/ num_ops;
 }
 
+/**
+* benchDriver()
+*/
 inline void benchDriver(const int num_ops, const int num_nodes,
                         const int start, const int end) {
 
-    std::cout << " ****** Bench Driver with "<<  num_nodes<< " nodes Started ******" << std::endl;   
+    std::cout << " ****** Bench Driver with " << num_ops << " operations and "
+        << num_nodes << " nodes Started ******" << std::endl;
     const char separator = ' ';
-    const int numWidth = 15;
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp";
+    const int numWidth = 20;
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "GraphTime";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "StreamTime";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Speedup" << std::endl << std::endl;
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE StreamTime";
+    //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Speedup";
+    std::cout << std::endl << std::endl;
+
     for (int exp = start; exp <= end; ++exp) {
-        int N = 1 << exp;        
+        int N = 1 << exp;                
         double* d_r, * d_p;
         CUDA_ERROR(cudaMalloc((void**)&d_r, N * sizeof(double)));
         CUDA_ERROR(cudaMalloc((void**)&d_p, N * sizeof(double)));
@@ -155,23 +220,31 @@ inline void benchDriver(const int num_ops, const int num_nodes,
 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float graph_time = DaxpyGraph(N, d_r, d_p, num_ops, 10, h_p_gold.data());
+        float cublas_graph_time = cublasDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float stream_time = DaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
+        float cublas_stream_time = cublasDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
+
+
+        CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+        CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+        float handmade_stream_time = handmadeDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << graph_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << stream_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << stream_time/graph_time << std::endl;        
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
+        //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
+        std::wcout << std::endl;
         
 
         CUDA_ERROR(cudaFree(d_r));
         CUDA_ERROR(cudaFree(d_p));
     }
-    std::cout << " ****** Bench Driver with "<<  num_nodes<< " nodes Started ******" << std::endl;   
+    std::cout << " ****** Bench Driver with " << num_ops << " operations and "
+        << num_nodes << " nodes Ended ******" << std::endl;    
 }
 
 
