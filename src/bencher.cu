@@ -264,7 +264,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
 * benchDriver()
 */
 inline void benchDriver(const int num_ops, const int num_nodes,
-                        const int start, const int end) {
+                        const int start, const int end, const double max_bandwidth) {
 
     std::cout << " ****** Bench Driver with " << num_ops << " operations and "
         << num_nodes << " nodes Started ******" << std::endl;
@@ -272,6 +272,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Ideal Time";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
@@ -280,7 +281,8 @@ inline void benchDriver(const int num_ops, const int num_nodes,
     std::cout << std::endl << std::endl;
 
     for (int exp = start; exp <= end; ++exp) {
-        int N = 1 << exp;                
+        int N = 1 << exp;        
+        const double ideal_time = (24 * N) / (10e6 * max_bandwidth);
         double* d_r, * d_p;
         CUDA_ERROR(cudaMalloc((void**)&d_r, N * sizeof(double)));
         CUDA_ERROR(cudaMalloc((void**)&d_p, N * sizeof(double)));
@@ -316,10 +318,18 @@ inline void benchDriver(const int num_ops, const int num_nodes,
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
+
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << ideal_time;
+
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator)
+            << cublas_graph_time /*<< "(" << cublas_graph_time / ideal_time << ")"*/;
+
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) 
+            << cublas_stream_time /*<< "(" << cublas_stream_time / ideal_time << ")"*/;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) 
+            << handmade_graph_time /*<< "(" << handmade_graph_time / ideal_time << ")"*/;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator)
+            << handmade_stream_time /*<< "(" << handmade_stream_time / ideal_time << ")"*/;
         //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
         

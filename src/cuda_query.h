@@ -47,7 +47,7 @@ int _ConvertSMVer2Cores(int major, int minor){
 }
 
 	
-cudaDeviceProp cuda_query(const int dev){
+cudaDeviceProp cuda_query(const int dev, double&maxBW){
 
 	//Various query about the device we are using 	
 	int deviceCount;
@@ -88,7 +88,7 @@ cudaDeviceProp cuda_query(const int dev){
 	printf("\n GPU Max Clock rate: %.0f MHz (%0.2f GHz)", devProp.clockRate * 1e-3f, devProp.clockRate * 1e-6f);
 	printf("\n Memory Clock rate: %.0f Mhz", devProp.memoryClockRate * 1e-3f);
 	printf("\n Memory Bus Width:  %d-bit", devProp.memoryBusWidth);
-	const double maxBW = 2.0 * devProp.memoryClockRate*(devProp.memoryBusWidth / 8.0) / 1.0E6;
+	maxBW = 2.0 * devProp.memoryClockRate*(devProp.memoryBusWidth / 8.0) / 1.0E6;
 	printf("\n Peak Memory Bandwidth: %f(GB/s)", maxBW);
 	printf("\n Kernels compiled for compute capability: %d\n\n", cuda_arch());
 

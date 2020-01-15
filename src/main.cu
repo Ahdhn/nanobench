@@ -6,8 +6,9 @@
 
 int main(int argc, char** argv) {		
 	uint32_t device_id = 0;
+	double max_bandwidth = 0;
 	CUDA_ERROR(cudaSetDevice(device_id));
-	cuda_query(device_id);
+	cuda_query(device_id, max_bandwidth);
 	
 	/*benchDriver(200, 1, 1, 24);
 	benchDriver(200, 5, 1, 24);
@@ -16,7 +17,7 @@ int main(int argc, char** argv) {
 	benchDriver(200, 100, 1, 24);
 	benchDriver(200, 200, 1, 24);*/
 
-	benchDriver(200, 5, 1, 28);
+	benchDriver(200, 5, 1, 28, max_bandwidth);
 
 	/*for (int n = 1; n < 28; ++n) {
 		benchDriver(n, 1, 1, 28);
