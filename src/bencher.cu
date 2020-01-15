@@ -272,7 +272,8 @@ inline void benchDriver(const int num_ops, const int num_nodes,
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Ideal Time";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Practical Time";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
@@ -282,7 +283,8 @@ inline void benchDriver(const int num_ops, const int num_nodes,
 
     for (int exp = start; exp <= end; ++exp) {
         int N = 1 << exp;        
-        const double ideal_time = (24 * N) / (10e6 * max_bandwidth);
+        const double theoretical_time = (N / 10e6) * (24 / max_bandwidth);
+        float practical_time = 0;
         double* d_r, * d_p;
         CUDA_ERROR(cudaMalloc((void**)&d_r, N * sizeof(double)));
         CUDA_ERROR(cudaMalloc((void**)&d_p, N * sizeof(double)));
@@ -300,36 +302,52 @@ inline void benchDriver(const int num_ops, const int num_nodes,
             }
         }
 
+        //this is just for timing (2 read and 1 write)
+        CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+        CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+
+        cudaEvent_t start, stop;
+        CUDA_ERROR(cudaEventCreate(&start));
+        CUDA_ERROR(cudaEventCreate(&stop));
+        CUDA_ERROR(cudaEventRecord(start, NULL));                
+        CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
+        CUDA_ERROR(cudaMemcpy(d_p, d_r, N * sizeof(double), cudaMemcpyDeviceToDevice));
+        CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
+        CUDA_ERROR(cudaEventRecord(stop, NULL));
+        CUDA_ERROR(cudaEventSynchronize(stop));
+        CUDA_ERROR(cudaDeviceSynchronize());
+        CUDA_ERROR(cudaGetLastError());        
+        CUDA_ERROR(cudaEventElapsedTime(&practical_time, start, stop));
+        
+
+        //Launch cublas graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         float cublas_graph_time = cublasDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
 
+        //Launch cublas streams 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         float cublas_stream_time = cublasDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
         
+        //Launch handmade graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
 
+        //Launch handmade stream
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         float handmade_stream_time = handmadeDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << ideal_time;
-
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator)
-            << cublas_graph_time /*<< "(" << cublas_graph_time / ideal_time << ")"*/;
-
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) 
-            << cublas_stream_time /*<< "(" << cublas_stream_time / ideal_time << ")"*/;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) 
-            << handmade_graph_time /*<< "(" << handmade_graph_time / ideal_time << ")"*/;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator)
-            << handmade_stream_time /*<< "(" << handmade_stream_time / ideal_time << ")"*/;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << practical_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
         //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
         
