@@ -29,6 +29,76 @@ __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, doub
     }
 }
 
+
+/**
+* handmadeDaxpyGraph()
+*/
+inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int num_ops,
+    double* h_p_gold) {
+    //return the time in float 
+    const double alpha = 1.0;
+    const int threads = 128;
+    const int blocks = (N + threads - 1) / threads;
+
+    cudaStream_t stream;
+    CUDA_ERROR(cudaStreamCreate(&stream));
+    
+    cudaGraph_t graph;
+    CUDA_ERROR(cudaGraphCreate(&graph, 0));
+    cudaKernelNodeParams kernel_node_params = { 0 };
+    cudaGraphNode_t kernel_node;
+    std::vector<cudaGraphNode_t> depend;
+
+    void* kernel_args[4] = { (void*)&N, (void*)&d_r, (void*)&d_p, (void*)&alpha };
+    kernel_node_params.func = (void*)handmadeDaxpy;
+    kernel_node_params.gridDim = dim3(blocks, 1, 1);
+    kernel_node_params.blockDim = dim3(threads, 1, 1);
+    kernel_node_params.sharedMemBytes = 0;
+    kernel_node_params.kernelParams = (void**)kernel_args;
+    kernel_node_params.extra = NULL;    
+
+    CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node, graph, depend.data(), 
+        depend.size(), &kernel_node_params));
+
+    cudaGraphNode_t* nodes = NULL;
+    size_t generated_num_nodes = 0;
+    CUDA_ERROR(cudaGraphGetNodes(graph, nodes, &generated_num_nodes));
+    if (generated_num_nodes != 1) {
+        fprintf(stderr, "handmadeDaxpyGraph():: CUDA Graph has generated %d but the expected is %d",
+            static_cast<int>(generated_num_nodes), 1);
+        exit(EXIT_FAILURE);
+    }
+
+    cudaGraphExec_t exec_graph;
+    CUDA_ERROR(cudaGraphInstantiate(&exec_graph, graph, NULL, NULL, 0));
+
+    cudaEvent_t start, stop;
+    CUDA_ERROR(cudaEventCreate(&start));
+    CUDA_ERROR(cudaEventCreate(&stop));
+    CUDA_ERROR(cudaEventRecord(start, stream));
+
+    for (int iter = 0; iter < num_ops; ++iter) {
+        CUDA_ERROR(cudaGraphLaunch(exec_graph, stream));        
+        CUDA_ERROR(cudaStreamSynchronize(stream));
+    }
+
+    CUDA_ERROR(cudaEventRecord(stop, stream));
+    CUDA_ERROR(cudaEventSynchronize(stop));
+    CUDA_ERROR(cudaDeviceSynchronize());
+    CUDA_ERROR(cudaGetLastError());
+    CUDA_ERROR(cudaStreamDestroy(stream));
+
+    float time = 0.0f;//ms
+    CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
+
+
+    if (!moveAndCompare(N, d_p, h_p_gold)) {
+        std::cout << " handmadeDaxpyStream() failed with N = " << N << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    return time / num_ops;
+}
+
 /** 
 * handmadeDaxpyStream()
 */
@@ -195,6 +265,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE StreamTime";
     //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Speedup";
     std::cout << std::endl << std::endl;
@@ -225,7 +296,10 @@ inline void benchDriver(const int num_ops, const int num_nodes,
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         float cublas_stream_time = cublasDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
-
+        
+        CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+        CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
+        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data());
 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
@@ -235,6 +309,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
         //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
