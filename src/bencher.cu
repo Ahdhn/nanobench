@@ -42,7 +42,7 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     }
     int num_runs = num_ops / num_nodes;
     const double alpha = 1.0;
-    const int threads = 128;
+    const int threads = 256;
     const int blocks = (N + threads - 1) / threads;
 
     cudaStream_t stream;
@@ -115,7 +115,7 @@ inline float handmadeDaxpyStream(const int N, double* d_r, double* d_p, const in
     double* h_p_gold) {
     //return the time in float 
     const double alpha = 1.0;
-    const int threads = 128;
+    const int threads = 256;
     const int blocks = (N + threads - 1) / threads;
 
     cudaStream_t stream;
