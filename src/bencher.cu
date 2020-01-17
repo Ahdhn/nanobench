@@ -264,7 +264,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
 /**
 * benchDriver()
 */
-inline void benchDriver(const int num_ops, const int num_nodes,
+inline void axpyDriver(const int num_ops, const int num_nodes,
                         const int start, const int end, const double max_bandwidth) {
 
     CUDA_ERROR(cudaProfilerStart());
