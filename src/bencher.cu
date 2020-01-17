@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <cuda_profiler_api.h>
 
 inline bool moveAndCompare(const int N, double* d_p, double* h_p_gold) {
 
@@ -266,6 +267,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
 inline void benchDriver(const int num_ops, const int num_nodes,
                         const int start, const int end, const double max_bandwidth) {
 
+    CUDA_ERROR(cudaProfilerStart());
     std::cout << " ****** Bench Driver with " << num_ops << " operations and "
         << num_nodes << " nodes Started ******" << std::endl;
     const char separator = ' ';
@@ -282,7 +284,7 @@ inline void benchDriver(const int num_ops, const int num_nodes,
     std::cout << std::endl << std::endl;
 
     for (int exp = start; exp <= end; ++exp) {
-        int N = 1 << exp;        
+        int N = 1 << exp;                
         const double theoretical_time = (N / 10e6) * (24 / max_bandwidth);
         float practical_time = 0;
         double* d_r, * d_p;
@@ -348,15 +350,17 @@ inline void benchDriver(const int num_ops, const int num_nodes,
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
-        //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
         
 
         CUDA_ERROR(cudaFree(d_r));
-        CUDA_ERROR(cudaFree(d_p));
+        CUDA_ERROR(cudaFree(d_p));       
     }
     std::cout << " ****** Bench Driver with " << num_ops << " operations and "
         << num_nodes << " nodes Ended ******" << std::endl;    
+
+    CUDA_ERROR(cudaProfilerStop());
 }
 
 
