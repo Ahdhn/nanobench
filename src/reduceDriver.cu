@@ -8,7 +8,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
-#include <cub\cub.cuh>
+#include <cub/cub.cuh>
 
 enum class ReduceOp
 {
@@ -82,7 +82,7 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
     //return the time in float 
     const int threads = 256;
     //stride is number of hops a the block will make
-    const int num_hops = 10;
+    const int num_hops = 20;
     const int stride = (N + num_hops - 1) / num_hops;
     const int blocks = (stride + threads - 1) / threads;
     
@@ -159,7 +159,7 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
     double h_res(0);
     CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
 
-    if (std::abs(h_res - gold) > 0.00001) {
+    if (std::abs(h_res - gold) > 0.001) {
         fprintf(stderr, "handmadeReduceGraph():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
@@ -224,7 +224,7 @@ inline float cublasReduceStream(const int N, double* d_r, double* d_p,
     double h_res(0);
     CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
 
-    if (std::abs(h_res - gold) > 0.00001) {
+    if (std::abs(h_res - gold) > 0.001) {
         fprintf(stderr, "cublasReduceStream():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
@@ -314,7 +314,7 @@ inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const Reduce
     double h_res(0);
     CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
     
-    if (std::abs(h_res - gold) > 0.00001) {
+    if (std::abs(h_res - gold) > 0.001) {
         fprintf(stderr, "cublasReduceGraph():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
