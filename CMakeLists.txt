@@ -35,6 +35,7 @@ endif()
 ########## inc/libs/exe/features Starts Here ######################
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+include_directories("cub")
 
 file(GLOB_RECURSE MY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.*)
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MY_SRC})

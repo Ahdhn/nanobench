@@ -1,5 +1,5 @@
-#ifndef _CUGRAPH_
-#define _CUGRAPH_
+#ifndef _AXPY_DRIVER_
+#define _AXPY_DRIVER_
 
 
 #include "util.cu"
@@ -268,7 +268,7 @@ inline void axpyDriver(const int num_ops, const int num_nodes,
                         const int start, const int end, const double max_bandwidth) {
 
     CUDA_ERROR(cudaProfilerStart());
-    std::cout << " ****** Bench Driver with " << num_ops << " operations and "
+    std::cout << " ****** AXPY Driver with " << num_ops << " operations and "
         << num_nodes << " nodes Started ******" << std::endl;
     const char separator = ' ';
     const int numWidth = 20;
@@ -357,12 +357,12 @@ inline void axpyDriver(const int num_ops, const int num_nodes,
         CUDA_ERROR(cudaFree(d_r));
         CUDA_ERROR(cudaFree(d_p));       
     }
-    std::cout << " ****** Bench Driver with " << num_ops << " operations and "
-        << num_nodes << " nodes Ended ******" << std::endl;    
+    std::cout << " ****** AXPY Driver with " << num_ops << " operations and "
+        << num_nodes << " nodes Stopped ******" << std::endl;    
 
     CUDA_ERROR(cudaProfilerStop());
 }
 
 
 
-#endif // ! _CUGRAPH_
+#endif //_AXPY_DRIVER_
