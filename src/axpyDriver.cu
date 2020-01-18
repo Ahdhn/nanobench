@@ -20,7 +20,7 @@ inline bool moveAndCompare(const int N, double* d_p, double* h_p_gold) {
 
 __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, double alpha) {
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;    
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;    
     if (tid < N) {
         double p = d_p[tid];
         double r = d_r[tid];
@@ -35,13 +35,8 @@ __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, doub
 * handmadeDaxpyGraph()
 */
 inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int num_ops,
-                                const int num_nodes, double* h_p_gold) {
-    //return the time in float 
-    if (num_ops % num_nodes != 0) {
-        fprintf(stderr, "cublasDaxpyGraph():: num_ops should be divisible by num_nodes");
-        exit(EXIT_FAILURE);
-    }
-    int num_runs = num_ops / num_nodes;
+                                double* h_p_gold) {
+    //return the time in float         
     const double alpha = 1.0;
     const int threads = 256;
     const int blocks = (N + threads - 1) / threads;
@@ -62,20 +57,16 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     kernel_node_params.kernelParams = (void**)kernel_args;
     kernel_node_params.extra = NULL;    
 
-    std::vector<cudaGraphNode_t> kernel_node(num_nodes);
-    CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node[0], graph, NULL,
-        0, &kernel_node_params));
-    for (int n = 1; n < num_nodes; ++n) {
-        CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node[n], graph, &kernel_node[n-1],
-            1, &kernel_node_params));
-    }
+    cudaGraphNode_t *kernel_node=NULL;
+    CUDA_ERROR(cudaGraphAddKernelNode(kernel_node, graph, NULL,
+        0, &kernel_node_params));    
 
     cudaGraphNode_t* nodes = NULL;
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(graph, nodes, &generated_num_nodes));
-    if (generated_num_nodes != num_nodes) {
+    if (generated_num_nodes != 1) {
         fprintf(stderr, "handmadeDaxpyGraph():: CUDA Graph has generated %d but the expected is %d",
-            static_cast<int>(generated_num_nodes), num_nodes);
+            static_cast<int>(generated_num_nodes), 1);
         exit(EXIT_FAILURE);
     }
 
@@ -87,7 +78,7 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     CUDA_ERROR(cudaEventCreate(&stop));
     CUDA_ERROR(cudaEventRecord(start, stream));
 
-    for (int iter = 0; iter < num_runs; ++iter) {
+    for (int iter = 0; iter < num_ops; ++iter) {
         CUDA_ERROR(cudaGraphLaunch(exec_graph, stream));        
         CUDA_ERROR(cudaStreamSynchronize(stream));
     }
@@ -198,15 +189,10 @@ inline float cublasDaxpyStream(const int N, double* d_r, double* d_p, const int 
 * cublasDaxpyGraph()
 */
 inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int num_ops,
-                        const int num_nodes, double* h_p_gold) {
-    //return the time in float 
-    if(num_ops % num_nodes != 0){
-        fprintf(stderr, "cublasDaxpyGraph():: num_ops should be divisible by num_nodes");        
-        exit(EXIT_FAILURE);
-    }
+    double* h_p_gold) {
+    //return the time in float     
     
-    double alpha = 1.0;
-    int num_runs = num_ops/num_nodes;
+    double alpha = 1.0;    
     cudaGraph_t cuda_graph;
     cudaStream_t capture_stream;
     cublasHandle_t cublas_handle = 0;
@@ -215,17 +201,16 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
     CUDA_ERROR(cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeGlobal));
     CUBLAS_ERROR(cublasSetStream(cublas_handle, capture_stream));
     CUBLAS_ERROR(cublasSetPointerMode(cublas_handle, CUBLAS_POINTER_MODE_HOST));
-    for(int n=0;n<num_nodes;++n){
-        CUBLAS_ERROR(cublasDaxpy(cublas_handle, N, &alpha, d_r, 1, d_p, 1));
-    }
+    
+    CUBLAS_ERROR(cublasDaxpy(cublas_handle, N, &alpha, d_r, 1, d_p, 1));    
     CUDA_ERROR(cudaStreamEndCapture(capture_stream, &cuda_graph));
 
     cudaGraphNode_t* nodes = NULL;
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(cuda_graph, nodes, &generated_num_nodes));
-    if (generated_num_nodes != num_nodes) {
+    if (generated_num_nodes != 1) {
         fprintf(stderr, "cublasDaxpyGraph():: CUDA Graph has generated %d but the expected is %d",        
-        static_cast<int>(generated_num_nodes), num_nodes);                
+        static_cast<int>(generated_num_nodes), 1);                
         exit(EXIT_FAILURE);
     }   
     cudaGraphExec_t cuda_graph_exec;
@@ -235,7 +220,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
     CUDA_ERROR(cudaEventCreate(&start));
     CUDA_ERROR(cudaEventCreate(&stop));
     CUDA_ERROR(cudaEventRecord(start, capture_stream));
-    for (int iter = 0; iter < num_runs; ++iter) {
+    for (int iter = 0; iter < num_ops; ++iter) {
         CUDA_ERROR(cudaGraphLaunch(cuda_graph_exec, capture_stream));
         CUDA_ERROR(cudaStreamSynchronize(capture_stream));
     }
@@ -264,12 +249,11 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
 /**
 * benchDriver()
 */
-inline void axpyDriver(const int num_ops, const int num_nodes,
-                        const int start, const int end, const double max_bandwidth) {
+inline void axpyDriver(const int num_ops, const int start, const int end, 
+    const double max_bandwidth) {
 
     CUDA_ERROR(cudaProfilerStart());
-    std::cout << " ****** AXPY Driver with " << num_ops << " operations and "
-        << num_nodes << " nodes Started ******" << std::endl;
+    std::cout << " ****** AXPY Driver with " << num_ops << " operations Started ******" << std::endl;
     const char separator = ' ';
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
@@ -325,7 +309,7 @@ inline void axpyDriver(const int num_ops, const int num_nodes,
         //Launch cublas graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float cublas_graph_time = cublasDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
+        float cublas_graph_time = cublasDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data());
 
         //Launch cublas streams 
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
@@ -335,7 +319,7 @@ inline void axpyDriver(const int num_ops, const int num_nodes,
         //Launch handmade graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, num_nodes, h_p_gold.data());
+        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data());
 
         //Launch handmade stream
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
@@ -357,8 +341,7 @@ inline void axpyDriver(const int num_ops, const int num_nodes,
         CUDA_ERROR(cudaFree(d_r));
         CUDA_ERROR(cudaFree(d_p));       
     }
-    std::cout << " ****** AXPY Driver with " << num_ops << " operations and "
-        << num_nodes << " nodes Stopped ******" << std::endl;    
+    std::cout << " ****** AXPY Driver with " << num_ops << " operations Stopped ******" << std::endl;    
 
     CUDA_ERROR(cudaProfilerStop());
 }

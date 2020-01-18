@@ -8,30 +8,175 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <cub\cub.cuh>
 
 enum class ReduceOp
 {
     DOT = 0,
     NORM2 = 1,
 };
-
-
 inline std::string OpToString(const ReduceOp ops) {
     return (ops == ReduceOp::DOT) ? "DOT" : "NORM2";
+}
+
+template <int blockThreads>
+__device__ __forceinline__ void cubBlockReducer(const double&thread_data,
+    double* d_per_block_res) {
+
+    typedef cub::BlockReduce<double, blockThreads>BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    double block_total = BlockReduce(temp_storage).Sum(thread_data);
+    if (threadIdx.x == 0) {
+        d_per_block_res[blockIdx.x] = block_total;
+    }
+}
+/**
+* blockNorm2()
+*/
+template<int blockThreads>
+__global__ static void blockNorm2(const int N, const double* d_r,
+    double* d_per_block_res) {
+
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    double thread_data = 0;
+    for (int i = tid; i < N; i += blockDim.x * gridDim.x) {
+        double r = d_r[i];
+        thread_data += r * r;
+    }
+    __syncthreads();
+    cubBlockReducer<blockThreads>(thread_data, d_per_block_res);
+}
+
+/**
+* blockDot()
+*/
+template<int blockThreads>
+__global__ static void blockDot(const int N, const double*d_r, const double*d_p, 
+    double*d_per_block_res){
+
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    double thread_data = 0;
+    for (int i = tid; i < N; i += blockDim.x * gridDim.x){
+        double p = d_p[i];
+        double r = d_r[i];        
+        thread_data += p * r;        
+    }
+    __syncthreads();    
+    cubBlockReducer<blockThreads>(thread_data, d_per_block_res);
+}
+
+/**
+* sqrt()
+*/
+__global__ static void sqrt(double* d_res) {
+    //launch only one thread to do this 
+    d_res[0] = sqrt(d_res[0]);
+}
+
+/**
+* handmadeReduceGraph()
+*/
+inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const ReduceOp ops, 
+    const int num_ops, const double gold) {
+
+    //return the time in float 
+    const int threads = 256;
+    //stride is number of hops a the block will make
+    const int num_hops = 10;
+    const int stride = (N + num_hops - 1) / num_hops;
+    const int blocks = (stride + threads - 1) / threads;
+    
+
+    double* d_per_block_res(NULL);
+    CUDA_ERROR(cudaMalloc((void**)&d_per_block_res, blocks * sizeof(double)));
+    double* d_res(NULL);
+    CUDA_ERROR(cudaMalloc((void**)&d_res, sizeof(double)));
+
+    void* d_cub_temp_storage = NULL;
+    size_t cub_temp_storage_bytes = 0;
+    cub::DeviceReduce::Sum(d_cub_temp_storage, cub_temp_storage_bytes, 
+        d_per_block_res, d_res, blocks);    
+    CUDA_ERROR(cudaMalloc(&d_cub_temp_storage, cub_temp_storage_bytes));
+
+    cudaStream_t stream;
+    CUDA_ERROR(cudaStreamCreate(&stream));
+    cudaGraph_t graph;    
+    CUDA_ERROR(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+
+    switch (ops)
+    {
+    case ReduceOp::DOT: {
+        blockDot<threads> <<< blocks, threads, 0, stream >>> (N, d_r, d_p, d_per_block_res);
+        break;
+    }
+    case ReduceOp::NORM2: {
+        blockNorm2<threads> <<< blocks, threads, 0, stream >>> (N, d_r, d_per_block_res);
+        break;
+    }
+    default:
+        fprintf(stderr, "handmadeReduceGraph():: unsupported operation!!");
+        exit(EXIT_FAILURE);        
+    }
+    cub::DeviceReduce::Sum(d_cub_temp_storage, cub_temp_storage_bytes, d_per_block_res,
+        d_res, blocks, stream);   
+    if (ops == ReduceOp::NORM2) {
+        sqrt <<< 1, 1, 0, stream >>>(d_res);
+    }
+    CUDA_ERROR(cudaStreamEndCapture(stream, &graph));
+
+    cudaGraphNode_t* nodes = NULL;
+    size_t generated_num_nodes = 0;
+    CUDA_ERROR(cudaGraphGetNodes(graph, nodes, &generated_num_nodes));
+    /*if (generated_num_nodes != 2) {
+        fprintf(stderr, "handmadeReduceGraph():: CUDA Graph has generated %d but the expected is %d",
+            static_cast<int>(generated_num_nodes), 1);
+        exit(EXIT_FAILURE);
+    }*/
+    
+    cudaGraphExec_t cuda_graph_exec;
+    CUDA_ERROR(cudaGraphInstantiate(&cuda_graph_exec, graph, NULL, NULL, 0));
+
+    cudaEvent_t start, stop;
+    CUDA_ERROR(cudaEventCreate(&start));
+    CUDA_ERROR(cudaEventCreate(&stop));
+    CUDA_ERROR(cudaEventRecord(start, stream));
+    for (int iter = 0; iter < num_ops; ++iter) {
+        CUDA_ERROR(cudaGraphLaunch(cuda_graph_exec, stream));
+        CUDA_ERROR(cudaStreamSynchronize(stream));
+    }
+
+    CUDA_ERROR(cudaEventRecord(stop, stream));
+    CUDA_ERROR(cudaEventSynchronize(stop));
+    CUDA_ERROR(cudaDeviceSynchronize());
+    CUDA_ERROR(cudaGetLastError());
+    CUDA_ERROR(cudaGraphExecDestroy(cuda_graph_exec));
+    CUDA_ERROR(cudaGraphDestroy(graph));
+    CUDA_ERROR(cudaStreamDestroy(stream));    
+
+    float time = 0.0f;//ms
+    CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
+
+    double h_res(0);
+    CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
+
+    if (std::abs(h_res - gold) > 0.00001) {
+        fprintf(stderr, "handmadeReduceGraph():: failed with N= %d", N);
+        exit(EXIT_FAILURE);
+    }
+
+    CUDA_ERROR(cudaFree(d_per_block_res));
+    CUDA_ERROR(cudaFree(d_res));
+    CUDA_ERROR(cudaFree(d_cub_temp_storage));
+
+    return time / num_ops;
 }
 
 /**
 * cublasReduceStream()
 */
 inline float cublasReduceStream(const int N, double* d_r, double* d_p,
-    const ReduceOp ops, const int num_ops, const int num_nodes, const double gold) {
-
-    if (num_ops % num_nodes != 0) {
-        fprintf(stderr, "cublasReduceStream():: num_ops should be divisible by num_nodes");
-        exit(EXIT_FAILURE);
-    }
-    int num_runs = num_ops / num_nodes;
-
+    const ReduceOp ops, const int num_ops, const double gold) {
+        
     double* d_res;
     CUDA_ERROR(cudaMalloc((void**)&d_res, sizeof(double)));
     CUDA_ERROR(cudaMemset((void*)d_res, 0, sizeof(double)));
@@ -60,7 +205,8 @@ inline float cublasReduceStream(const int N, double* d_r, double* d_p,
             break;
         }
         default:
-            break;
+            fprintf(stderr, "cublasReduceStream():: unsupported operation!!");
+            exit(EXIT_FAILURE);            
         }
         CUDA_ERROR(cudaStreamSynchronize(cublas_stream));
     }
@@ -79,7 +225,7 @@ inline float cublasReduceStream(const int N, double* d_r, double* d_p,
     CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
 
     if (std::abs(h_res - gold) > 0.00001) {
-        fprintf(stderr, "cublasReduceGraph():: failed with N= %d", N);
+        fprintf(stderr, "cublasReduceStream():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
 
@@ -94,14 +240,8 @@ inline float cublasReduceStream(const int N, double* d_r, double* d_p,
 * cublasReduceGraph()
 */
 inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const ReduceOp ops,
-    const int num_ops, const int num_nodes, const double gold) {
+    const int num_ops, const double gold) {
     
-    if (num_ops % num_nodes != 0) {
-        fprintf(stderr, "cublasReduceGraph():: num_ops should be divisible by num_nodes");
-        exit(EXIT_FAILURE);
-    }
-    int num_runs = num_ops / num_nodes;
-
     double* d_res;
     CUDA_ERROR(cudaMalloc((void**)&d_res, sizeof(double)));
     CUDA_ERROR(cudaMemset((void*)d_res, 0, sizeof(double)));
@@ -114,21 +254,23 @@ inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const Reduce
     CUDA_ERROR(cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeGlobal));
     CUBLAS_ERROR(cublasSetStream(cublas_handle, capture_stream));
     CUBLAS_ERROR(cublasSetPointerMode(cublas_handle, CUBLAS_POINTER_MODE_DEVICE));
-    for (int n = 0; n < num_nodes; ++n) {
-        switch (ops)
-        {
-        case ReduceOp::DOT: {
-            CUBLAS_ERROR(cublasDdot(cublas_handle, N, d_p, 1, d_r, 1, d_res));            
-            break;
-        }
-        case ReduceOp::NORM2: {
-            CUBLAS_ERROR(cublasDnrm2(cublas_handle, N, d_r, 1, d_res));           
-            break;
-        }
-        default:
-            break;
-        }        
+    
+    switch (ops)
+    {
+    case ReduceOp::DOT: {
+        CUBLAS_ERROR(cublasDdot(cublas_handle, N, d_p, 1, d_r, 1, d_res));
+        break;
     }
+    case ReduceOp::NORM2: {
+        CUBLAS_ERROR(cublasDnrm2(cublas_handle, N, d_r, 1, d_res));
+        break;
+    }
+    default:
+        fprintf(stderr, "cublasReduceGraph():: unsupported operation!!");
+        exit(EXIT_FAILURE);
+        break;
+    }
+
     CUDA_ERROR(cudaStreamEndCapture(capture_stream, &cuda_graph));
 
     cudaGraphNode_t* nodes = NULL;
@@ -139,9 +281,9 @@ inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const Reduce
     //different number of nodes 
     int factor = (ops == ReduceOp::DOT) ? 2 : 4;
 
-    if (generated_num_nodes != num_nodes* factor) {
+    if (generated_num_nodes != factor) {
         fprintf(stderr, "cublasReduceGraph():: CUDA Graph has generated %d but the expected is %d",
-            static_cast<int>(generated_num_nodes), num_nodes);
+            static_cast<int>(generated_num_nodes), 1);
         exit(EXIT_FAILURE);
     }
     cudaGraphExec_t cuda_graph_exec;
@@ -151,7 +293,7 @@ inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const Reduce
     CUDA_ERROR(cudaEventCreate(&start));
     CUDA_ERROR(cudaEventCreate(&stop));
     CUDA_ERROR(cudaEventRecord(start, capture_stream));
-    for (int iter = 0; iter < num_runs; ++iter) {
+    for (int iter = 0; iter < num_ops; ++iter) {
         CUDA_ERROR(cudaGraphLaunch(cuda_graph_exec, capture_stream));
         CUDA_ERROR(cudaStreamSynchronize(capture_stream));
     }
@@ -182,12 +324,12 @@ inline float cublasReduceGraph(const int N, double*d_r, double*d_p, const Reduce
 
 }
 
-inline void reduceDriver(const int num_ops, const int num_nodes, 
-    const int start, const int end,  const double max_bandwidth, const ReduceOp ops) {
+inline void reduceDriver(const int num_ops, const int start, const int end,  
+    const double max_bandwidth, const ReduceOp ops) {
     //
     CUDA_ERROR(cudaProfilerStart());
-    std::cout << " ****** Reduce Driver ("<< OpToString (ops) <<") with " << num_ops << " operations and "
-        << num_nodes << " nodes Started ******" << std::endl;
+    std::cout << " ****** Reduce Driver ("<< OpToString (ops) <<") with " << 
+        num_ops << " operations Started ******" << std::endl;
     const char separator = ' ';
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
@@ -234,7 +376,8 @@ inline void reduceDriver(const int num_ops, const int num_nodes,
                 break;
             }            
             default:
-                break;
+                fprintf(stderr, "reduceDriver():: unsupported operation!!");
+                exit(EXIT_FAILURE);                
             }            
         }
         if (ops == ReduceOp::NORM2) {
@@ -246,16 +389,16 @@ inline void reduceDriver(const int num_ops, const int num_nodes,
             CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         }
 
-        float cublas_graph_time = cublasReduceGraph(N, d_r, d_p, ops, num_ops,  num_nodes, gold);
-        float cublas_stream_time = cublasReduceStream(N, d_r, d_p, ops, num_ops, num_nodes, gold);
-        float handmade_graph_time = 0;
+        //float cublas_graph_time = cublasReduceGraph(N, d_r, d_p, ops, num_ops, gold);        
+        float cublas_stream_time = cublasReduceStream(N, d_r, d_p, ops, num_ops, gold);
+        float handmade_graph_time = handmadeReduceGraph(N, d_r, d_p, ops, num_ops, gold);
         float handmade_stream_time = 0;
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << practical_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "???";//cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
@@ -270,8 +413,8 @@ inline void reduceDriver(const int num_ops, const int num_nodes,
     }
 
 
-    std::cout << " ****** Reduce Driver (" << OpToString(ops) << ") with " << num_ops << " operations and "
-        << num_nodes << " nodes Stopped ******" << std::endl;
+    std::cout << " ****** Reduce Driver (" << OpToString(ops) << ") with " 
+        << num_ops << " operations Stopped ******" << std::endl;
     CUDA_ERROR(cudaProfilerStop());
 }
 
