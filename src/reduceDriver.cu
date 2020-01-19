@@ -119,9 +119,9 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
     }
     cub::DeviceReduce::Sum(d_cub_temp_storage, cub_temp_storage_bytes, d_per_block_res,
         d_res, blocks, stream);   
-    if (ops == ReduceOp::NORM2) {
-        sqrt <<< 1, 1, 0, stream >>>(d_res);
-    }
+    //if (ops == ReduceOp::NORM2) {
+    //    sqrt <<< 1, 1, 0, stream >>>(d_res);
+    //}
     CUDA_ERROR(cudaStreamEndCapture(stream, &graph));
 
     cudaGraphNode_t* nodes = NULL;
@@ -159,7 +159,7 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
     double h_res(0);
     CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
 
-    if (std::abs(h_res - gold) > 0.001) {
+    if (std::abs(h_res - gold*gold) > 0.001) {
         fprintf(stderr, "handmadeReduceGraph():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
