@@ -127,11 +127,11 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
     cudaGraphNode_t* nodes = NULL;
     size_t generated_num_nodes = 0;
     CUDA_ERROR(cudaGraphGetNodes(graph, nodes, &generated_num_nodes));
-    /*if (generated_num_nodes != 2) {
-        fprintf(stderr, "handmadeReduceGraph():: CUDA Graph has generated %d but the expected is %d",
-            static_cast<int>(generated_num_nodes), 1);
+    if (generated_num_nodes <= 0) {
+        fprintf(stderr, "handmadeReduceGraph():: CUDA Graph has %d nodes",
+            static_cast<int>(generated_num_nodes));
         exit(EXIT_FAILURE);
-    }*/
+    }
     
     cudaGraphExec_t cuda_graph_exec;
     CUDA_ERROR(cudaGraphInstantiate(&cuda_graph_exec, graph, NULL, NULL, 0));
@@ -161,6 +161,84 @@ inline float handmadeReduceGraph(const int N, double *d_r, double*d_p, const Red
 
     if (std::abs(h_res - gold) > 0.001) {
         fprintf(stderr, "handmadeReduceGraph():: failed with N= %d", N);
+        exit(EXIT_FAILURE);
+    }
+
+    CUDA_ERROR(cudaFree(d_per_block_res));
+    CUDA_ERROR(cudaFree(d_res));
+    CUDA_ERROR(cudaFree(d_cub_temp_storage));
+
+    return time / num_ops;
+}
+
+/**
+* handmadeReduceStream()
+*/
+inline float handmadeReduceStream(const int N, double* d_r, double* d_p, const ReduceOp ops,
+    const int num_ops, const double gold) {
+
+    //return the time in float 
+    const int threads = 256;
+    //stride is number of hops a the block will make
+    const int num_hops = 20;
+    const int stride = (N + num_hops - 1) / num_hops;
+    const int blocks = (stride + threads - 1) / threads;
+    
+    double* d_per_block_res(NULL);
+    CUDA_ERROR(cudaMalloc((void**)&d_per_block_res, blocks * sizeof(double)));
+    double* d_res(NULL);
+    CUDA_ERROR(cudaMalloc((void**)&d_res, sizeof(double)));
+
+    void* d_cub_temp_storage = NULL;
+    size_t cub_temp_storage_bytes = 0;
+    cub::DeviceReduce::Sum(d_cub_temp_storage, cub_temp_storage_bytes,
+        d_per_block_res, d_res, blocks);
+    CUDA_ERROR(cudaMalloc(&d_cub_temp_storage, cub_temp_storage_bytes));
+
+    cudaStream_t stream;
+    CUDA_ERROR(cudaStreamCreate(&stream));
+
+    cudaEvent_t start, stop;
+    CUDA_ERROR(cudaEventCreate(&start));
+    CUDA_ERROR(cudaEventCreate(&stop));
+    CUDA_ERROR(cudaEventRecord(start, stream));
+
+    for (int iter = 0; iter < num_ops; ++iter) {
+        switch (ops)
+        {
+        case ReduceOp::DOT: {
+            blockDot<threads> << < blocks, threads, 0, stream >> > (N, d_r, d_p, d_per_block_res);
+            break;
+        }
+        case ReduceOp::NORM2: {
+            blockNorm2<threads> << < blocks, threads, 0, stream >> > (N, d_r, d_per_block_res);
+            break;
+        }
+        default:
+            fprintf(stderr, "handmadeReduceStream():: unsupported operation!!");
+            exit(EXIT_FAILURE);
+        }
+        cub::DeviceReduce::Sum(d_cub_temp_storage, cub_temp_storage_bytes, d_per_block_res,
+            d_res, blocks, stream);
+        if (ops == ReduceOp::NORM2) {
+            sqrt <<< 1, 1, 0, stream >>> (d_res);
+        }
+        CUDA_ERROR(cudaStreamSynchronize(stream));
+    }
+    CUDA_ERROR(cudaEventRecord(stop, stream));
+    CUDA_ERROR(cudaEventSynchronize(stop));
+    CUDA_ERROR(cudaDeviceSynchronize());
+    CUDA_ERROR(cudaGetLastError());
+    CUDA_ERROR(cudaStreamDestroy(stream));
+
+    float time = 0.0f;//ms
+    CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
+
+    double h_res(0);
+    CUDA_ERROR(cudaMemcpy((void*)&h_res, (void*)d_res, sizeof(double), cudaMemcpyDeviceToHost));
+
+    if (std::abs(h_res - gold) > 0.001) {
+        fprintf(stderr, "handmadeReduceStream():: failed with N= %d", N);
         exit(EXIT_FAILURE);
     }
 
@@ -392,7 +470,7 @@ inline void reduceDriver(const int num_ops, const int start, const int end,
         //float cublas_graph_time = cublasReduceGraph(N, d_r, d_p, ops, num_ops, gold);        
         float cublas_stream_time = cublasReduceStream(N, d_r, d_p, ops, num_ops, gold);
         float handmade_graph_time = handmadeReduceGraph(N, d_r, d_p, ops, num_ops, gold);
-        float handmade_stream_time = 0;
+        float handmade_stream_time = handmadeReduceStream(N, d_r, d_p, ops, num_ops, gold);
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;

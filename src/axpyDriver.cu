@@ -334,7 +334,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_stream_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
+        //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time/ cublas_graph_time;
         std::wcout << std::endl;
         
 
