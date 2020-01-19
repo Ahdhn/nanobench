@@ -11,9 +11,9 @@ int main(int argc, char** argv) {
 	CUDA_ERROR(cudaSetDevice(device_id));
 	cuda_query(device_id, max_bandwidth);
 	
-	//axpyDriver(200, 1, 28, max_bandwidth);
-	reduceDriver(200, 1, 24, max_bandwidth, ReduceOp::DOT);
-	reduceDriver(200, 1, 24, max_bandwidth, ReduceOp::NORM2);
+	axpyDriver(200, 1, 30, max_bandwidth);
+	reduceDriver(200, 1, 30, max_bandwidth, ReduceOp::DOT);
+	reduceDriver(200, 1, 30, max_bandwidth, ReduceOp::NORM2);
 
 
 	return 0;

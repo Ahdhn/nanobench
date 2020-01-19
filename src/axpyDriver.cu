@@ -57,8 +57,8 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
     kernel_node_params.kernelParams = (void**)kernel_args;
     kernel_node_params.extra = NULL;    
 
-    cudaGraphNode_t *kernel_node=NULL;
-    CUDA_ERROR(cudaGraphAddKernelNode(kernel_node, graph, NULL,
+    cudaGraphNode_t kernel_node;
+    CUDA_ERROR(cudaGraphAddKernelNode(&kernel_node, graph, NULL,
         0, &kernel_node_params));    
 
     cudaGraphNode_t* nodes = NULL;
