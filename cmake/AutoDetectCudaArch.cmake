@@ -65,5 +65,7 @@ if(NOT DEFINED CUDA_ARCHS)
 endif()
 ###################################################################################
 
-#list(APPEND CUDA_NVCC_FLAGS ${CUDA_ARCHS})
+if (MSVC)
+	list(APPEND CUDA_NVCC_FLAGS ${CUDA_ARCHS})
+endif()
 list(APPEND CMAKE_CUDA_FLAGS ${CUDA_ARCHS})
