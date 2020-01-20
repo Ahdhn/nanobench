@@ -17,16 +17,32 @@ inline bool moveAndCompare(const int N, double* d_p, double* h_p_gold) {
     return compare_arr(h_p_gold, h_p_res.data(), N);
 }
 
+/**
+* memcpy_kernel()
+*/
+__global__ void static memcpy_kernel(double* d_dest, const double* d_src, uint32_t length) {
+    const uint32_t stride = blockDim.x * gridDim.x;
+    uint32_t i = blockDim.x * blockIdx.x + threadIdx.x;
+    while (i < length) {
+        d_dest[i] = d_src[i];
+        i += stride;
+    }
+}
 
+/**
+* handmadeDaxpy()
+*/
 __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, double alpha) {
 
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;    
-    if (tid < N) {
-        double p = d_p[tid];
-        double r = d_r[tid];
+    const uint32_t stride = blockDim.x * gridDim.x;
+    uint32_t i = blockDim.x * blockIdx.x + threadIdx.x;
+    while (i < N) {
+        double p = d_p[i];
+        double r = d_r[i];
         p *= alpha;
         p += r;
-        d_p[tid] = p;
+        d_p[i] = p;
+        i += stride;
     }
 }
 
@@ -35,11 +51,15 @@ __global__ void static handmadeDaxpy(const int N, double* d_r, double* d_p, doub
 * handmadeDaxpyGraph()
 */
 inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int num_ops,
-                                double* h_p_gold) {
+                                double* h_p_gold, const int sm_count) {
     //return the time in float         
     const double alpha = 1.0;
     const int threads = 256;
-    const int blocks = (N + threads - 1) / threads;
+    //const int blocks = (N + threads - 1) / threads;
+    int num_blocks_per_sm = 0;
+    CUDA_ERROR(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
+        (void*)handmadeDaxpy, threads, 0));
+    const int blocks = num_blocks_per_sm * sm_count;
 
     cudaStream_t stream;
     CUDA_ERROR(cudaStreamCreate(&stream));
@@ -104,11 +124,15 @@ inline float handmadeDaxpyGraph(const int N, double* d_r, double* d_p, const int
 * handmadeDaxpyStream()
 */
 inline float handmadeDaxpyStream(const int N, double* d_r, double* d_p, const int num_ops,
-    double* h_p_gold) {
+    double* h_p_gold, const int sm_count) {
     //return the time in float 
     const double alpha = 1.0;
     const int threads = 256;
-    const int blocks = (N + threads - 1) / threads;
+    //const int blocks = (N + threads - 1) / threads;
+    int num_blocks_per_sm = 0;
+    CUDA_ERROR(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
+        (void*)handmadeDaxpy, threads, 0));
+    const int blocks = num_blocks_per_sm * sm_count;
 
     cudaStream_t stream;
     CUDA_ERROR(cudaStreamCreate(&stream));
@@ -250,7 +274,7 @@ inline float cublasDaxpyGraph(const int N, double*d_r, double *d_p, const int nu
 * benchDriver()
 */
 inline void axpyDriver(const int num_ops, const int start, const int end, 
-    const double max_bandwidth) {
+    const double max_bandwidth, const int sm_count) {
 
     CUDA_ERROR(cudaProfilerStart());
     std::cout << " ****** AXPY Driver with " << num_ops << " operations Started ******" << std::endl;
@@ -292,18 +316,43 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
 
-        cudaEvent_t start, stop;
-        CUDA_ERROR(cudaEventCreate(&start));
-        CUDA_ERROR(cudaEventCreate(&stop));
-        CUDA_ERROR(cudaEventRecord(start, NULL));                
-        CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
-        CUDA_ERROR(cudaMemcpy(d_p, d_r, N * sizeof(double), cudaMemcpyDeviceToDevice));
-        CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
-        CUDA_ERROR(cudaEventRecord(stop, NULL));
-        CUDA_ERROR(cudaEventSynchronize(stop));
-        CUDA_ERROR(cudaDeviceSynchronize());
-        CUDA_ERROR(cudaGetLastError());        
-        CUDA_ERROR(cudaEventElapsedTime(&practical_time, start, stop));
+        {
+            const int threads = 256;
+            int num_blocks_per_sm = 0;
+            CUDA_ERROR(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
+                (void*)memcpy_kernel, threads, 0));
+            const int blocks = num_blocks_per_sm * sm_count;
+
+            for (int i = 0; i < num_ops; ++i) {
+                //each memcpy_kernel does N memory read and N memory write. Thus, total
+                //memory traffic of 2N. We want to find the time of 3N memory traffic because
+                //this is what axpy does. so we launch three of these kernels (3*2N memory traffic)
+                //and then divide by 2 (3*2N/2 = 3N)
+                
+                cudaEvent_t start, stop;
+                cudaStream_t stream;
+                CUDA_ERROR(cudaStreamCreate(&stream));
+                CUDA_ERROR(cudaEventCreate(&start));
+                CUDA_ERROR(cudaEventCreate(&stop));
+                CUDA_ERROR(cudaEventRecord(start, stream));
+                memcpy_kernel << < blocks, threads, 0, stream >> > (d_r, d_p, N);
+                memcpy_kernel << < blocks, threads, 0, stream >> > (d_p, d_r, N);
+                memcpy_kernel << < blocks, threads, 0, stream >> > (d_r, d_p, N);                
+                //CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
+                //CUDA_ERROR(cudaMemcpy(d_p, d_r, N * sizeof(double), cudaMemcpyDeviceToDevice));
+                //CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));                
+                CUDA_ERROR(cudaEventRecord(stop, stream));
+                CUDA_ERROR(cudaEventSynchronize(stop));
+                CUDA_ERROR(cudaDeviceSynchronize());
+                CUDA_ERROR(cudaGetLastError());
+                float time = 0;
+                CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
+                time /= 2;
+                CUDA_ERROR(cudaStreamDestroy(stream));
+                practical_time += time;
+            }
+            practical_time /= num_ops;
+        }
         
 
         //Launch cublas graph
@@ -319,12 +368,12 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
         //Launch handmade graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data());
+        float handmade_graph_time = handmadeDaxpyGraph(N, d_r, d_p, num_ops, h_p_gold.data(), sm_count);
 
         //Launch handmade stream
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
         CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        float handmade_stream_time = handmadeDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data());
+        float handmade_stream_time = handmadeDaxpyStream(N, d_r, d_p, num_ops, h_p_gold.data(), sm_count);
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
