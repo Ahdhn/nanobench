@@ -41,7 +41,7 @@ file(GLOB_RECURSE MY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.*)
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MY_SRC})
 
 
-CUDA_ADD_EXECUTABLE(${PROJECT_NAME} "${MY_SRC}")
+add_executable(${PROJECT_NAME} "${MY_SRC}")
 
 ##add features to the library -> require it to compile with cuda c++11
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
@@ -52,5 +52,5 @@ set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE  ON)
 ##enable the separate compilation on both device and host sides 
 set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES} cuda cublas cudart_static)
+target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES} cuda cublas)
 ########## inc/libs/exe/features Ends Here ######################

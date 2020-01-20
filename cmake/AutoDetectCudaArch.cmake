@@ -29,7 +29,7 @@ if(NOT DEFINED CUDA_ARCHS)
 		"				else { return -1; }\n"
 		"			}\n"
 		"			if (is_unique) {\n"
-		"				fprintf(stderr, \" -gencode arch=compute_%d%d,code=sm_%d%d\", prop.major, prop.minor, prop.major, prop.minor);\n"
+		"				fprintf(stderr, \" -gencode arch=compute_%d%d,code=sm_%d%d;\", prop.major, prop.minor, prop.major, prop.minor);\n"
 		"			}\n"
 		"		}\n"
 		"		else { return -1; }\n"
@@ -65,5 +65,5 @@ if(NOT DEFINED CUDA_ARCHS)
 endif()
 ###################################################################################
 
-#list(APPEND CUDA_NVCC_FLAGS ${CUDA_ARCHS})
+list(APPEND CUDA_NVCC_FLAGS ${CUDA_ARCHS})
 list(APPEND CMAKE_CUDA_FLAGS ${CUDA_ARCHS})
