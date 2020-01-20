@@ -282,8 +282,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Practical Time";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";    
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
@@ -293,8 +292,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
 
     for (int exp = start; exp <= end; ++exp) {
         int N = 1 << exp;                
-        const double theoretical_time = (N / 10e6) * (24 / max_bandwidth);
-        float practical_time = 0;
+        const double theoretical_time = (N / 10e6) * (24 / max_bandwidth);        
         double* d_r, * d_p;
         CUDA_ERROR(cudaMalloc((void**)&d_r, N * sizeof(double)));
         CUDA_ERROR(cudaMalloc((void**)&d_p, N * sizeof(double)));
@@ -314,46 +312,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
 
         //this is just for timing (2 read and 1 write)
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-        CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));
-
-        {
-            const int threads = 256;
-            int num_blocks_per_sm = 0;
-            CUDA_ERROR(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_per_sm,
-                (void*)memcpy_kernel, threads, 0));
-            const int blocks = num_blocks_per_sm * sm_count;
-
-            for (int i = 0; i < num_ops; ++i) {
-                //each memcpy_kernel does N memory read and N memory write. Thus, total
-                //memory traffic of 2N. We want to find the time of 3N memory traffic because
-                //this is what axpy does. so we launch three of these kernels (3*2N memory traffic)
-                //and then divide by 2 (3*2N/2 = 3N)
-                
-                cudaEvent_t start, stop;
-                cudaStream_t stream;
-                CUDA_ERROR(cudaStreamCreate(&stream));
-                CUDA_ERROR(cudaEventCreate(&start));
-                CUDA_ERROR(cudaEventCreate(&stop));
-                CUDA_ERROR(cudaEventRecord(start, stream));
-                memcpy_kernel << < blocks, threads, 0, stream >> > (d_r, d_p, N);
-                memcpy_kernel << < blocks, threads, 0, stream >> > (d_p, d_r, N);
-                memcpy_kernel << < blocks, threads, 0, stream >> > (d_r, d_p, N);                
-                //CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));
-                //CUDA_ERROR(cudaMemcpy(d_p, d_r, N * sizeof(double), cudaMemcpyDeviceToDevice));
-                //CUDA_ERROR(cudaMemcpy(d_r, d_p, N * sizeof(double), cudaMemcpyDeviceToDevice));                
-                CUDA_ERROR(cudaEventRecord(stop, stream));
-                CUDA_ERROR(cudaEventSynchronize(stop));
-                CUDA_ERROR(cudaDeviceSynchronize());
-                CUDA_ERROR(cudaGetLastError());
-                float time = 0;
-                CUDA_ERROR(cudaEventElapsedTime(&time, start, stop));
-                time /= 2;
-                CUDA_ERROR(cudaStreamDestroy(stream));
-                practical_time += time;
-            }
-            practical_time /= num_ops;
-        }
-        
+        CUDA_ERROR(cudaMemcpy(d_p, h_p.data(), N * sizeof(double), cudaMemcpyHostToDevice));        
 
         //Launch cublas graph
         CUDA_ERROR(cudaMemcpy(d_r, h_r.data(), N * sizeof(double), cudaMemcpyHostToDevice));
@@ -377,8 +336,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << practical_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;        
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;

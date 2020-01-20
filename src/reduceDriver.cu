@@ -460,8 +460,7 @@ inline void reduceDriver(const int num_ops, const int start, const int end,
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Practical Time";
+    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";    
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
@@ -470,8 +469,7 @@ inline void reduceDriver(const int num_ops, const int start, const int end,
 
     for (int exp = start; exp <= end; ++exp) {
         int N = 1 << exp;
-        const double theoretical_time = 0;//TODO
-        const double practical_time = 0;//TODO
+        const double theoretical_time = 0;//TODO        
         double* d_r(NULL), * d_p(NULL);
 
         CUDA_ERROR(cudaMalloc((void**)&d_r, N * sizeof(double)));
@@ -522,8 +520,7 @@ inline void reduceDriver(const int num_ops, const int start, const int end,
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << practical_time;
+        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;        
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "???";//cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
