@@ -40,11 +40,8 @@ include_directories("cub")
 file(GLOB_RECURSE MY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.*)
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MY_SRC})
 
-if (MSVC)
-	add_executable(${PROJECT_NAME} "${MY_SRC}")	
-else()
-	CUDA_ADD_EXECUTABLE(${PROJECT_NAME} "${MY_SRC}")
-endif()
+
+CUDA_ADD_EXECUTABLE(${PROJECT_NAME} "${MY_SRC}")
 
 ##add features to the library -> require it to compile with cuda c++11
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
