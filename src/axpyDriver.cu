@@ -282,7 +282,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
     const int numWidth = 20;
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Exp (2^x)";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Size";
-    std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";    
+    //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "Theoretical Time";    
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS GraphTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "CUBLAS StreamTime";
     std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << "HANDMADE GraphTime";
@@ -336,7 +336,7 @@ inline void axpyDriver(const int num_ops, const int start, const int end,
 
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << exp;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << N;
-        std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;        
+        //std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << theoretical_time;        
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_graph_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << cublas_stream_time;
         std::cout << std::left << std::setw(numWidth) << std::setfill(separator) << handmade_graph_time;
